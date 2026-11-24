@@ -1432,6 +1432,52 @@ function netTick(dt){
   const p=player.position;const st={x:Math.round(p.x*100)/100,y:Math.round(p.y*100)/100,z:Math.round(p.z*100)/100,h:Math.round(heading*100)/100,s:veh?Math.round(Math.abs(vs)*10)/10:Math.round(player.userData.amp/.16*10)/10,n:myNick,c:myCol,m:myMsg,mt:myMt,v:veh,pu:punchN,pt:punchTgt,ko:koT>0?1:0,rd:ride?1:0};
   const js=JSON.stringify(st);if(js===lastSent&&keepT>0)return;lastSent=js;keepT=1;netSend(st);}
 
+/* ---------- 차도 위 물건 치우기 (깃발·콘·나무·가로등·펜스 등) ---------- */
+const ROADLOG=[];
+{scene.updateMatrixWorld(true);const bb=new THREE.Box3(),sz=new THREE.Vector3(),cv=new THREE.Vector3();
+  const ROADC=new Set(['46494e','5c5f64','55585d','4a4d52','2b2d31','2a2a2a']);const SURF=[],MARK=new Set();
+  scene.traverse(o=>{if(!o.isMesh||o.isInstancedMesh||!o.material||!o.material.color)return;bb.setFromObject(o);bb.getSize(sz);
+    if(sz.y<.6&&Math.max(sz.x,sz.z)>.8){SURF.push(o);const c=o.material.color;if(sz.y<.15&&(c.r+c.g+c.b>2.3||c.getHex()===0xf2c230))MARK.add(o);}});
+  const rc=new THREE.Raycaster(),DN=new THREE.Vector3(0,-1,0),O=new THREE.Vector3();
+  const asph=(x,z)=>{O.set(x,80,z);rc.set(O,DN);for(const h of rc.intersectObjects(SURF,false)){if(MARK.has(h.object))continue;return h.point.y-groundY(x,z)<.4&&ROADC.has(h.object.material.color.getHexString());}return false;};
+  const onRd=(x,z)=>distPoly(x,z,ROAD)<6.6||INROADS.some(r=>distPoly(x,z,r)<3.1)||asph(x,z);
+  const keep=new Set([player,...WV.map(v=>v.g),...cars.map(c=>c.g),...npcs.map(n=>n.g),...SURF.filter(o=>{bb.setFromObject(o);bb.getSize(sz);return Math.max(sz.x,sz.z)>4;})]);sigHeads.forEach(h=>{keep.add(h.car);keep.add(h.ped);});
+  const gone=[];
+  // 1) 바닥에 서 있는 작은 물건 (높은 건 가는 기둥만 — 건물 기둥·문기둥은 남김)
+  for(const o of[...scene.children]){if(keep.has(o)||!(o.isMesh||o.isGroup)||o.isInstancedMesh)continue;bb.setFromObject(o);if(bb.isEmpty())continue;bb.getSize(sz);bb.getCenter(cv);
+    const fp=Math.max(sz.x,sz.z);if(fp>8||sz.y<.25||(sz.y>=3.5&&fp>.6))continue;const lift=bb.min.y-groundY(cv.x,cv.z);if(lift>1.2||lift<-2||DOORS.some(d=>Math.hypot(d.x-cv.x,d.z-cv.z)<4))continue;
+    const hx=sz.x*.3,hz=sz.z*.3;if(onRd(cv.x,cv.z)||[[hx,hz],[-hx,hz],[hx,-hz],[-hx,-hz]].some(([a,b])=>asph(cv.x+a,cv.z+b))){gone.push([cv.x,cv.z]);scene.remove(o);ROADLOG.push(['o',cv.x|0,cv.z|0,+sz.y.toFixed(1)]);}}
+  // 2) 여러 개 찍어낸 물건(나무·가로등 등)
+  const M=new THREE.Matrix4(),P=new THREE.Vector3(),Z=new THREE.Matrix4().makeScale(0,0,0);
+  scene.children.forEach(o=>{if(!o.isInstancedMesh)return;o.geometry.computeBoundingBox();const gb=o.geometry.boundingBox;if(gb.max.y-gb.min.y<.3)return;let ch=0;
+    for(let i=0;i<o.count;i++){o.getMatrixAt(i,M);P.setFromMatrixPosition(M);if(onRd(P.x,P.z)){o.setMatrixAt(i,Z);ch=1;gone.push([P.x,P.z]);ROADLOG.push(['i',P.x|0,P.z|0]);}}if(ch)o.instanceMatrix.needsUpdate=true;});
+  // 3) 치운 물건에 붙어 있던 것(깃발·표지판·차단기·지붕 등)
+  for(const o of[...scene.children]){if(keep.has(o)||!(o.isMesh||o.isGroup)||o.isInstancedMesh)continue;bb.setFromObject(o);if(bb.isEmpty())continue;bb.getSize(sz);if(Math.max(sz.x,sz.z)>8)continue;bb.getCenter(cv);
+    const lift=bb.min.y-groundY(cv.x,cv.z);if(lift>7||lift<-2||DOORS.some(d=>Math.hypot(d.x-cv.x,d.z-cv.z)<4))continue;
+    if(gone.some(([x,z])=>Math.hypot(x-cv.x,z-cv.z)<(lift>=1&&Math.max(sz.x,sz.z)<=3?1.3:2.5))&&(lift>=1||onRd(cv.x,cv.z))){scene.remove(o);ROADLOG.push(['f',cv.x|0,cv.z|0]);}}
+  // 4) 치운 물건의 충돌 상자 + 차도 위 보이지 않는 벽
+  for(let i=colliders.length-1;i>=0;i--){const b=colliders[i];let cx,cz,hx,hz,c=1,s=0;
+    if(b.hx!==undefined){cx=b.cx;cz=b.cz;hx=b.hx;hz=b.hz;c=b.c;s=b.s;}else{cx=(b.x0+b.x1)/2;cz=(b.z0+b.z1)/2;hx=(b.x1-b.x0)/2;hz=(b.z1-b.z0)/2;}
+    if(hx*hz*4>400)continue;const nx=Math.min(10,Math.max(1,Math.round(hx))),nz=Math.min(10,Math.max(1,Math.round(hz)));let on=0;
+    for(let a=0;a<nx;a++)for(let d=0;d<nz;d++){const lx=(nx>1?a/(nx-1)*2-1:0)*hx*.8,lz=(nz>1?d/(nz-1)*2-1:0)*hz*.8;if(onRd(cx+lx*c+lz*s,cz-lx*s+lz*c))on++;}
+    const near=gone.some(([x,z])=>Math.abs(x-cx)<hx+.8&&Math.abs(z-cz)<hz+.8&&Math.max(hx,hz)<2),thin=Math.min(hx,hz)<.5&&Math.max(hx,hz)>1.5;
+    if(on/(nx*nz)>=.5&&(near||thin)){colliders.splice(i,1);ROADLOG.push(['c',cx|0,cz|0,+(hx*2).toFixed(1),+(hz*2).toFixed(1)]);}}
+}
+/* ---------- 탈것끼리 부딪히면 튕겨나감 ---------- */
+function remoteVehCols(){const out=[];for(const[,r]of remotes){if(!r.v||!VBOX[r.v])continue;const g=r.g,[hw,hl]=VBOX[r.v];out.push({cx:g.position.x,cz:g.position.z,hx:hw,hz:hl,c:Math.cos(g.rotation.y),s:Math.sin(g.rotation.y)});}return out;}
+let bumpCool=0;
+function vehBump(p,x0,z0,dt){bumpCool-=dt;const cx=p.x-x0,cz=p.z-z0,d=Math.hypot(cx,cz);if(!veh||d<1e-4||bumpCool>0||Math.abs(vs)<1.2)return;
+  const nx=cx/d,nz=cz/d,sg=Math.sign(vs);if(Math.sin(heading)*sg*nx+Math.cos(heading)*sg*nz>-.2)return;// 진행 방향으로 들이받았을 때만
+  const sp=Math.abs(vs);let best=null,bd=1e9;
+  for(const v of WV){if(v===curV)continue;const dd=Math.hypot(v.g.position.x-p.x,v.g.position.z-p.z)-(v.t===3?5:v.t===2?2.2:.8);if(dd<bd){bd=dd;best=v;}}
+  if(best&&bd<VT[veh].r+.8){const m=(best.t===3?.25:best.t===2?.75:1.5)*(veh===3?1.6:veh===2?1:.5);
+    best.kv=[-nx*sp*m,-nz*sp*m];best.ks=(R()-.5)*sp*.5*m;best.used=true;best.idle=0;}
+  else for(const c of cars){if(Math.hypot(c.pos[0]-p.x,c.pos[1]-p.z)<c.hl+3)c.v=0;}
+  vs=-vs*(veh===3?.25:veh===2?.45:.6);p.x+=nx*.2;p.z+=nz*.2;bumpCool=.35;hitFx(p.x-nx*VT[veh].r,p.y+.8,p.z-nz*VT[veh].r);}
+function bumpTick(dt){for(const v of WV){if(!v.kv||v===curV)continue;const g=v.g,x=g.position.x+v.kv[0]*dt,z=g.position.z+v.kv[1]*dt;
+    if(!blocked(x,z,v.t===3?1.4:v.t===2?1:.3)){g.position.x=x;g.position.z=z;g.position.y=groundY(x,z)+(v.t===2||v.t===3?.05:0);}else{v.kv[0]*=-.3;v.kv[1]*=-.3;}
+    g.rotation.y+=v.ks*dt;const f=Math.exp(-2.2*dt);v.kv[0]*=f;v.kv[1]*=f;v.ks*=f;const s=Math.hypot(v.kv[0],v.kv[1]);(v.wheels||[]).forEach(w=>w.rotation.x+=s*dt*2);if(s<.15)v.kv=null;}}
+
 /* ---------- 루프 ---------- */
 const ray=new THREE.Raycaster();const tmpV=new THREE.Vector3(),tmpT=new THREE.Vector3();
 const clock=new THREE.Clock();let T=0;
@@ -1457,11 +1503,11 @@ function frame(){
     p.x+=Math.sin(heading)*vs*dt;p.z+=Math.cos(heading)*vs*dt;}
   const carCols=cars.map(c=>({cx:c.pos[0],cz:c.pos[1],hx:1.2,hz:c.hl,c:Math.cos(Math.atan2(c.fw[0],c.fw[1])),s:Math.sin(Math.atan2(c.fw[0],c.fw[1]))}));
   if(INSIDE){const lv=intLevel(p.y);collide(p,.35,INSIDE.cols.filter(c=>c.lvl<0||c.lvl===lv));}
-  else{const PR=veh?VT[veh].r:.35;collide(p,PR,colliders);collide(p,PR,carCols);collide(p,PR,vehCols());p.x=Math.max(-390,Math.min(430,p.x));p.z=Math.max(-330,Math.min(360,p.z));}
+  else{const PR=veh?VT[veh].r:.35;collide(p,PR,colliders);const bx0=p.x,bz0=p.z;collide(p,PR,carCols);collide(p,PR,vehCols());collide(p,PR,remoteVehCols());vehBump(p,bx0,bz0,dt);p.x=Math.max(-390,Math.min(430,p.x));p.z=Math.max(-330,Math.min(360,p.z));}
   if((keys.Space||jumpReq)&&grounded&&koT<=0&&!ride&&!(veh===2||veh===3)){vy=8;grounded=false;}jumpReq=false;
   let gy;if(INSIDE){const f=interiorFloor(INSIDE,p);gy=f.y;if(f.esc&&grounded){p.z+=f.esc.dir*.9*dt;gy=interiorFloor(INSIDE,p).y;}}else gy=groundY(p.x,p.z);vy-=15*dt;p.y+=vy*dt;
   if(p.y<=gy){p.y=gy;vy=0;grounded=true;}else if(grounded&&p.y-gy<.6){p.y=gy;}
-  player.rotation.y=heading;if(veh===1||veh===4)ridePose(player,veh,Math.abs(vs),dt);else animPerson(player,grounded&&!veh&&koT<=0?spd:0,dt);punchTick(dt);vehRam();vehTick(p,dt,veh?Math.abs(vs)/4:mag);
+  player.rotation.y=heading;if(veh===1||veh===4)ridePose(player,veh,Math.abs(vs),dt);else animPerson(player,grounded&&!veh&&koT<=0?spd:0,dt);punchTick(dt);vehRam();bumpTick(dt);vehTick(p,dt,veh?Math.abs(vs)/4:mag);
   doorTick(p,dt);if(INSIDE)escTick(INSIDE,dt);
   for(const[,r]of remotes){if(r.tx>2500){const k=Math.round((r.tx-3000)/130);if(k>=0&&k<DOORS.length)buildInterior(k);}}
 
