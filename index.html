@@ -1231,11 +1231,8 @@ addEventListener('keydown',e=>{if(document.activeElement&&document.activeElement
  canvas.addEventListener('touchmove',e=>{if(e.touches.length!==2||!pd)return;const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);dist=Math.max(.6,Math.min(260,dist*pd/d));pd=d;},{passive:true});
  canvas.addEventListener('touchend',()=>{pd=0;},{passive:true});}
 
-/* ---------- 새로고침/업데이트 후에도 제자리 유지 ---------- */
-{const K='cau_walk_pos';try{const v=JSON.parse(localStorage.getItem(K)||'null');
-   if(v&&isFinite(v.x)&&isFinite(v.z)&&Math.abs(v.x)<1500&&Math.abs(v.z)<1500&&!blocked(v.x,v.z,.4)){player.position.set(v.x,groundY(v.x,v.z),v.z);if(isFinite(v.h))heading=v.h;if(isFinite(v.y))yaw=v.y;if(isFinite(v.p))pitch=v.p;if(isFinite(v.d))dist=v.d;}}catch(_){}
- setInterval(()=>{if(INSIDE)return;try{localStorage.setItem(K,JSON.stringify({x:+player.position.x.toFixed(2),z:+player.position.z.toFixed(2),h:heading,y:yaw,p:pitch,d:dist}));}catch(_){}},1000);}
-
+/* ---------- 들어오면 누구나 정문 같은 자리에서 시작 (예전 저장 위치는 무시) ---------- */
+{try{localStorage.removeItem('cau_walk_pos');}catch(_){}const s=(Math.random()-.5)*2.4;player.position.x+=GT[0]*s;player.position.z+=GT[1]*s;player.position.y=groundY(player.position.x,player.position.z);}
 
 /* ---------- 놓여 있는 탈것에 다가가서 타기 (E 키 / 타기 버튼) ---------- */
 // 종류: 1 자전거, 2 자동차, 3 버스, 4 오토바이
