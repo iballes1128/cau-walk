@@ -1383,7 +1383,7 @@ function netOnline(){return room?room.connected():pj.online;}
 function pjPeers(){const list=[];for(const id in pj.states){if(id===pj.myId)continue;list.push({peer:id,sameTab:false,kind:'viewer',presence:pj.states[id]||{}});}syncPeers(list);}
 function pjCleanup(){pj.online=false;pj.host=false;pj.conns.clear();pj.conn=null;if(pj.peer){const o=pj.peer;pj.peer=null;try{o.destroy();}catch(_){}}}
 function pjLost(){if(pj.lost)return;pj.lost=true;pjCleanup();for(const[,r]of remotes)scene.remove(r.g);remotes.clear();pj.states={};setNet();
-  if(!pj.ever&&++pj.fails>6)return;setTimeout(()=>{pj.lost=false;pjStart();},600+Math.random()*2200);}
+  pj.fails++;setTimeout(()=>{pj.lost=false;pjStart();},Math.min(6000,600+pj.fails*500)+Math.random()*2000);}
 function pjStart(){if(!window.Peer||room)return;pjCleanup();let p;try{p=new Peer(HOST_ID,{debug:0});}catch(_){return;}pj.peer=p;
   p.on('open',id=>{if(pj.peer!==p)return;pj.host=true;pj.myId=id;pj.online=true;pj.ever=true;pj.fails=0;pj.states={};setNet();});
   p.on('connection',c=>{if(pj.peer!==p)return;if(pj.conns.size>30){c.close();return;}
@@ -1404,7 +1404,7 @@ function netSend(st,js){if(room){room.presence(st).catch(()=>{});return;}if(!pj.
 function pjHostTick(dt){if(room||!pj.host||!pj.online)return;pj.bt-=dt;if(pj.bt>0)return;pj.bt=1/15;
   const msg={t:'all',s:pj.states};for(const[,c]of pj.conns){if(c.open)try{c.send(msg);}catch(_){}}pjPeers();}
 
-function setNet(){if(!netOnline()){netTxt.textContent=(!room&&pj.peer)?'⏳ 연결 중…':'👤 혼자 산책 중';return;}
+function setNet(){if(!netOnline()){netTxt.textContent=(!room&&(pj.peer||pj.lost))?'⏳ 연결 중…'+(pj.fails?' (다시 시도 '+pj.fails+'번째)':''):'👤 혼자 산책 중';return;}
   const n=remotes.size+1;netTxt.textContent=n>1?`👥 ${n}명이 같이 산책 중`:'🟢 온라인 · 친구 기다리는 중';}
 const num=(v,a,b,d=0)=>typeof v==='number'&&isFinite(v)?Math.max(a,Math.min(b,v)):d;
 function syncPeers(peers){roomPeers=peers;const seen=new Set();
