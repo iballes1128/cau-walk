@@ -1414,7 +1414,7 @@ function syncPeers(peers){roomPeers=peers;const seen=new Set();
       const g=makePerson({skin:pick(SKIN),shirt:PCOL[ci],pants:pick(PANTS),hair:pick(HAIR),bag:0x3d6b4f});
       const tag=makeSprite(256,64,2.2,.55);tag.position.y=2.35;g.add(tag);const bub=makeSprite(512,128,4,1);bub.position.y=3.05;g.add(bub);
       scene.add(g);const old=r;r={g,tag,bub,ci,mt:0,until:0,h:0};if(old){r.g.position.copy(old.g.position);}else r.g.position.set(num(ps.x,-600,6000),num(ps.y,-30,120),num(ps.z,-600,600));remotes.set(pr.peer,r);}
-    r.tx=num(ps.x,-600,6000);r.ty=num(ps.y,-30,120);r.tz=num(ps.z,-600,600);r.v=num(ps.v,0,4)|0;r.th=num(ps.h,-10,10);r.ts=num(ps.s,0,20);r.ko=ps.ko?1:0;r.rd=ps.rd?1:0;{const pu=num(ps.pu,0,1e9);if(r.pu!==undefined&&pu!==r.pu){r.punchT=.35;if(ps.pt&&ps.pt===pj.myId)getHit(r);}r.pu=pu;}
+    r.tx=num(ps.x,-600,6000);r.ty=num(ps.y,-30,120);r.tz=num(ps.z,-600,600);r.v=num(ps.v,0,4)|0;r.th=num(ps.h,-10,10);r.ts=num(ps.s,0,20);r.ko=ps.ko?1:0;r.rd=ps.rd?1:0;{const pu=num(ps.pu,0,1e9);if(r.pu!==undefined&&pu!==r.pu){r.punchT=.35;if(ps.pt&&ps.pt===pj.myId)getHit(r);}r.pu=pu;}{const bu=num(ps.bu,0,1e9);if(r.bu!==undefined&&bu!==r.bu&&ps.bt&&ps.bt===pj.myId&&Array.isArray(ps.bk))getBumped(num(ps.bk[0],-40,40),num(ps.bk[1],-40,40));r.bu=bu;}
     const nick=(typeof ps.n==='string'?ps.n:'산책러').replace(/[\u0000-\u001f]/g,'').slice(0,10)||'산책러';setTag(r.tag,nick,PCOLS[ci]);
     const mt=num(ps.mt,0,1e15);if(mt&&mt!==r.mt){r.mt=mt;r.msg=(typeof ps.m==='string'?ps.m:'').replace(/[\u0000-\u001f]/g,'').slice(0,40);r.until=performance.now()+6000;}}
   for(const[k,r]of remotes)if(!seen.has(k)){scene.remove(r.g);remotes.delete(k);}
@@ -1429,7 +1429,7 @@ function netTick(dt){
   setBubble(myBub,performance.now()<myBubUntil?myMsg:'');
   pjHostTick(dt);
   sendT-=dt;keepT-=dt;if(!netOnline()||sendT>0)return;sendT=1/15;
-  const p=player.position;const st={x:Math.round(p.x*100)/100,y:Math.round(p.y*100)/100,z:Math.round(p.z*100)/100,h:Math.round(heading*100)/100,s:veh?Math.round(Math.abs(vs)*10)/10:Math.round(player.userData.amp/.16*10)/10,n:myNick,c:myCol,m:myMsg,mt:myMt,v:veh,pu:punchN,pt:punchTgt,ko:koT>0?1:0,rd:ride?1:0};
+  const p=player.position;const st={x:Math.round(p.x*100)/100,y:Math.round(p.y*100)/100,z:Math.round(p.z*100)/100,h:Math.round(heading*100)/100,s:veh?Math.round(Math.abs(vs)*10)/10:Math.round(player.userData.amp/.16*10)/10,n:myNick,c:myCol,m:myMsg,mt:myMt,v:veh,pu:punchN,pt:punchTgt,bu:bumpN,bt:bumpTgt,bk:bumpK,ko:koT>0?1:0,rd:ride?1:0};
   const js=JSON.stringify(st);if(js===lastSent&&keepT>0)return;lastSent=js;keepT=1;netSend(st);}
 
 /* ---------- 차도 위 물건 치우기 (깃발·콘·나무·가로등·펜스 등) ---------- */
@@ -1463,18 +1463,34 @@ const ROADLOG=[];
     const near=gone.some(([x,z])=>Math.abs(x-cx)<hx+.8&&Math.abs(z-cz)<hz+.8&&Math.max(hx,hz)<2),thin=Math.min(hx,hz)<.5&&Math.max(hx,hz)>1.5;
     if(on/(nx*nz)>=.5&&(near||thin)){colliders.splice(i,1);ROADLOG.push(['c',cx|0,cz|0,+(hx*2).toFixed(1),+(hz*2).toFixed(1)]);}}
 }
-/* ---------- 탈것끼리 부딪히면 튕겨나감 ---------- */
+/* ---------- 탈것끼리 부딪히면: 빠른 쪽이 느린 쪽을 튕겨냄 ---------- */
 function remoteVehCols(){const out=[];for(const[,r]of remotes){if(!r.v||!VBOX[r.v])continue;const g=r.g,[hw,hl]=VBOX[r.v];out.push({cx:g.position.x,cz:g.position.z,hx:hw,hz:hl,c:Math.cos(g.rotation.y),s:Math.sin(g.rotation.y)});}return out;}
-let bumpCool=0;
-function vehBump(p,x0,z0,dt){bumpCool-=dt;const cx=p.x-x0,cz=p.z-z0,d=Math.hypot(cx,cz);if(!veh||d<1e-4||bumpCool>0||Math.abs(vs)<1.2)return;
-  const nx=cx/d,nz=cz/d,sg=Math.sign(vs);if(Math.sin(heading)*sg*nx+Math.cos(heading)*sg*nz>-.2)return;// 진행 방향으로 들이받았을 때만
-  const sp=Math.abs(vs);let best=null,bd=1e9;
-  for(const v of WV){if(v===curV)continue;const dd=Math.hypot(v.g.position.x-p.x,v.g.position.z-p.z)-(v.t===3?5:v.t===2?2.2:.8);if(dd<bd){bd=dd;best=v;}}
-  if(best&&bd<VT[veh].r+.8){const m=(best.t===3?.25:best.t===2?.75:1.5)*(veh===3?1.6:veh===2?1:.5);
-    best.kv=[-nx*sp*m,-nz*sp*m];best.ks=(R()-.5)*sp*.5*m;best.used=true;best.idle=0;}
-  else for(const c of cars){if(Math.hypot(c.pos[0]-p.x,c.pos[1]-p.z)<c.hl+3)c.v=0;}
-  vs=-vs*(veh===3?.25:veh===2?.45:.6);p.x+=nx*.2;p.z+=nz*.2;bumpCool=.35;hitFx(p.x-nx*VT[veh].r,p.y+.8,p.z-nz*VT[veh].r);}
-function bumpTick(dt){for(const v of WV){if(!v.kv||v===curV)continue;const g=v.g,x=g.position.x+v.kv[0]*dt,z=g.position.z+v.kv[1]*dt;
+let bumpCool=0,bumpN=0,bumpTgt='',bumpK=[0,0],pkv=null,pks=0;
+const VMASS={1:.4,2:1,3:3,4:.6};
+function boxGap(px,pz,cx,cz,hx,hz,ry){const dx=px-cx,dz=pz-cz,c=Math.cos(ry),s=Math.sin(ry),lx=dx*c-dz*s,lz=dx*s+dz*c;return Math.hypot(Math.max(0,Math.abs(lx)-hx),Math.max(0,Math.abs(lz)-hz));}
+function knockMe(kx,kz){pkv=[kx,kz];pks=(R()-.5)*Math.min(6,Math.hypot(kx,kz)*.4);vs*=.15;const p=player.position;hitFx(p.x,p.y+1,p.z);}
+function getBumped(kx,kz){if(veh)knockMe(kx,kz);}
+function vehBump(p,x0,z0,dt){bumpCool-=dt;const cx=p.x-x0,cz=p.z-z0,d=Math.hypot(cx,cz);if(!veh||d<1e-4||bumpCool>0)return;
+  const nx=cx/d,nz=cz/d,R0=VT[veh].r;let best=null,bg=.7;// n: 부딪힌 상대 → 나
+  const test=(kind,obj,x,z,hw,hl,ry,sp,t)=>{const g=boxGap(p.x,p.z,x,z,hw,hl,ry)-R0;if(g<bg){bg=g;best={kind,obj,sp,t};}};
+  for(const v of WV)if(v!==curV&&VBOX[v.t])test('w',v,v.g.position.x,v.g.position.z,VBOX[v.t][0],VBOX[v.t][1],v.g.rotation.y,v.kv?Math.hypot(v.kv[0],v.kv[1]):0,v.t);
+  for(const c of cars)test('c',c,c.pos[0],c.pos[1],1.2,c.hl,Math.atan2(c.fw[0],c.fw[1]),c.v,c.hl>3?3:2);
+  for(const[id,r]of remotes)if(r.v&&VBOX[r.v])test('r',id,r.g.position.x,r.g.position.z,VBOX[r.v][0],VBOX[r.v][1],r.g.rotation.y,r.ts||0,r.v);
+  if(!best)return;
+  const toward=Math.max(0,-(Math.sin(heading)*vs*nx+Math.cos(heading)*vs*nz));// 상대 쪽으로 달려간 내 속도
+  const m=Math.min(3,VMASS[veh]/VMASS[best.t]);
+  if(toward>1.5&&toward>best.sp+.5){// 내가 더 빠름 → 상대가 날아감
+    const k=toward*(.9+.5*m),kx=-nx*k,kz=-nz*k;
+    if(best.kind==='c'){const c=best.obj;cars.splice(cars.indexOf(c),1);const w={t:best.t,g:c.g,wheels:c.wheels||[]};WV.push(w);ejectDriver(w.t,w.g);best={kind:'w',obj:w};}
+    if(best.kind==='w'){const v=best.obj;v.kv=[kx,kz];v.ks=(R()-.5)*k*.5;v.used=true;v.idle=0;v.ret=null;v.leaving=false;}
+    else{bumpN++;bumpTgt=best.obj;bumpK=[Math.round(kx*10)/10,Math.round(kz*10)/10];lastSent='';sendT=0;}
+    vs*=Math.max(.25,1-.4/m);hitFx(p.x-nx*R0,p.y+.9,p.z-nz*R0);}
+  else if(best.kind!=='r'&&best.sp>toward+.5&&best.sp>1.5){const k=best.sp*(.9+.5/m);knockMe(nx*k,nz*k);}// 상대가 더 빠름 → 내가 날아감 (친구는 친구 화면에서 보내 줌)
+  else if(Math.abs(vs)>1){vs=-vs*.4;hitFx(p.x-nx*R0,p.y+.9,p.z-nz*R0);}// 비슷하면 둘 다 살짝 튕김
+  bumpCool=.4;}
+function bumpTick(dt){
+  if(pkv){const p=player.position;p.x+=pkv[0]*dt;p.z+=pkv[1]*dt;heading+=pks*dt;const f=Math.exp(-2.4*dt);pkv[0]*=f;pkv[1]*=f;pks*=f;if(Math.hypot(pkv[0],pkv[1])<.2)pkv=null;}
+  for(const v of WV){if(!v.kv||v===curV)continue;const g=v.g,x=g.position.x+v.kv[0]*dt,z=g.position.z+v.kv[1]*dt;
     if(!blocked(x,z,v.t===3?1.4:v.t===2?1:.3)){g.position.x=x;g.position.z=z;g.position.y=groundY(x,z)+(v.t===2||v.t===3?.05:0);}else{v.kv[0]*=-.3;v.kv[1]*=-.3;}
     g.rotation.y+=v.ks*dt;const f=Math.exp(-2.2*dt);v.kv[0]*=f;v.kv[1]*=f;v.ks*=f;const s=Math.hypot(v.kv[0],v.kv[1]);(v.wheels||[]).forEach(w=>w.rotation.x+=s*dt*2);if(s<.15)v.kv=null;}}
 
