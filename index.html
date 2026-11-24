@@ -32,6 +32,8 @@ button:active{transform:scale(.96)}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 </head>
 <body>
 <canvas id="c"></canvas>
@@ -1396,12 +1398,12 @@ function pjClient(){pjCleanup();let p;try{p=new Peer({debug:0});}catch(_){return
     c.on('close',()=>{if(pj.peer===p)pjLost();});c.on('error',()=>{if(pj.peer===p)pjLost();});
     setTimeout(()=>{if(pj.peer===p&&!c.open)pjLost();},9000);});
   p.on('error',()=>{if(pj.peer===p)pjLost();});}
-function netSend(st,js){if(room){room.presence(st).catch(()=>{});return;}if(!pj.online)return;
+function netSend(st,js){if(room){room.presence(st).catch(()=>{});return;}if(fb.ref){if(fb.on)fb.ref.set(Object.assign({t:firebase.database.ServerValue.TIMESTAMP},st)).catch(()=>{});return;}if(!pj.online)return;
   if(pj.host)pj.states[HOST_ID]=st;else if(pj.conn&&pj.conn.open)pj.conn.send({t:'me',s:st});}
 function pjHostTick(dt){if(room||!pj.host||!pj.online)return;pj.bt-=dt;if(pj.bt>0)return;pj.bt=1/15;
   const msg={t:'all',s:pj.states};for(const[,c]of pj.conns){if(c.open)try{c.send(msg);}catch(_){}}pjPeers();}
 
-function setNet(){if(!netOnline()){netTxt.textContent=(!room&&(pj.peer||pj.lost))?'⏳ 연결 중…'+(pj.fails?' (다시 시도 '+pj.fails+'번째)':''):'👤 혼자 산책 중';return;}
+function setNet(){if(!netOnline()){netTxt.textContent=(!room&&(pj.peer||pj.lost||fb.ref))?'⏳ 연결 중…'+(pj.fails?' (다시 시도 '+pj.fails+'번째)':''):'👤 혼자 산책 중';return;}
   const n=remotes.size+1;netTxt.textContent=n>1?`👥 ${n}명이 같이 산책 중`:'🟢 온라인 · 친구 기다리는 중';}
 const num=(v,a,b,d=0)=>typeof v==='number'&&isFinite(v)?Math.max(a,Math.min(b,v)):d;
 function syncPeers(peers){roomPeers=peers;const seen=new Set();
@@ -1416,7 +1418,21 @@ function syncPeers(peers){roomPeers=peers;const seen=new Set();
     const mt=num(ps.mt,0,1e15);if(mt&&mt!==r.mt){r.mt=mt;r.msg=(typeof ps.m==='string'?ps.m:'').replace(/[\u0000-\u001f]/g,'').slice(0,40);r.until=performance.now()+6000;}}
   for(const[k,r]of remotes)if(!seen.has(k)){scene.remove(r.g);remotes.delete(k);}
   setNet();}
-(async()=>{try{if(!window.claude||typeof window.claude.use!=='function'){pjStart();setNet();return;}const rm=await window.claude.use('room');if(!rm)return;room=rm;
+/* 링크로 들어온 사람은 무조건 같은 서버(Firebase CAU-WALK)에서 만남 */
+const fb={ref:null,on:false,off:0};
+function fbStart(){if(!window.firebase||!firebase.database){pjStart();return;}try{
+  const app=firebase.initializeApp({databaseURL:'https://cau-walk-default-rtdb.asia-southeast1.firebasedatabase.app'},'walk');
+  const db=app.database();pj.myId='p'+Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-3);
+  const list=db.ref('walk3d/players');fb.ref=list.child(pj.myId);
+  db.ref('.info/serverTimeOffset').on('value',s=>{fb.off=s.val()||0;});
+  db.ref('.info/connected').on('value',s=>{fb.on=!!s.val();pj.online=fb.on;if(fb.on){fb.ref.onDisconnect().remove();lastSent='';sendT=0;}setNet();});
+  const put=s=>{const v=s.val();if(v&&typeof v==='object')pj.states[s.key]=v;};
+  list.on('child_added',put);list.on('child_changed',put);list.on('child_removed',s=>{delete pj.states[s.key];});
+  addEventListener('pagehide',()=>{try{fb.ref.remove();}catch(_){}});
+  setInterval(()=>{const now=Date.now()+fb.off;for(const id in pj.states){const v=pj.states[id],age=now-(typeof v.t==='number'?v.t:0);
+    if(id!==pj.myId&&age>15000){delete pj.states[id];if(age>120000)list.child(id).remove().catch(()=>{});}}pjPeers();},100);
+}catch(e){fb.ref=null;pjStart();}}
+(async()=>{try{if(!window.claude||typeof window.claude.use!=='function'){fbStart();setNet();return;}const rm=await window.claude.use('room');if(!rm)return;room=rm;
   room.onPeers(ch=>syncPeers(ch.peers),()=>{for(const[,r]of remotes)scene.remove(r.g);remotes.clear();room=null;setNet();});
   room.onConnection(()=>setNet());}catch(_){room=null;}})();
 let lastSent='',sendT=0,keepT=0;
@@ -1425,7 +1441,7 @@ function netTick(dt){
     r.h=lerpAngle(r.h,r.th,Math.min(1,dt*12));g.rotation.y=r.h;if(r.v===1||r.v===4)ridePose(g,r.v,r.ts,dt);else animPerson(g,r.v?0:r.ts,dt);if(r.punchT>0){r.punchT-=dt;punchPose(g,r.punchT);}g.userData.body.visible=!(r.rd||r.v===2||r.v===3);if(r.koT>0)r.koT-=dt;g.rotation.order='YXZ';g.rotation.x+=(((r.ko||r.koT>0)&&!r.v?-Math.PI/2:0)-g.rotation.x)*Math.min(1,dt*10);if((r.vk||0)!==(r.v||0)){if(r.vm){g.remove(r.vm);r.vm=null;}g.children.forEach(c=>{if(c.userData.vb===undefined)c.userData.vb=c.visible;c.visible=(r.v===2||r.v===3)?false:c.userData.vb;});let vm=null;if(r.v===1)vm=makeBike(0x2a8fd8);else if(r.v===4)vm=makeMoto(0x1d1f22);else if(r.v===2)vm=makeCar(0x3a6fd0).g;else if(r.v===3)vm=makeBus().g;if(vm&&(r.v===2||r.v===3))addDriver(vm,r.v===3,PCOL[r.ci]);if(vm){scene.remove(vm);vm.visible=true;vm.position.set(0,r.v>=2&&r.v<=3?.05:0,0);vm.rotation.set(0,0,0);g.add(vm);r.vm=vm;}r.vk=r.v||0;}setBubble(r.bub,performance.now()<r.until?r.msg:'');}
   setBubble(myBub,performance.now()<myBubUntil?myMsg:'');
   pjHostTick(dt);
-  sendT-=dt;keepT-=dt;if(!netOnline()||sendT>0)return;sendT=1/15;
+  sendT-=dt;keepT-=dt;if(!netOnline()||sendT>0)return;sendT=fb.ref?1/8:1/15;
   const p=player.position;const st={x:Math.round(p.x*100)/100,y:Math.round(p.y*100)/100,z:Math.round(p.z*100)/100,h:Math.round(heading*100)/100,s:veh?Math.round(Math.abs(vs)*10)/10:Math.round(player.userData.amp/.16*10)/10,n:myNick,c:myCol,m:myMsg,mt:myMt,v:veh,pu:punchN,pt:punchTgt,bu:bumpN,bt:bumpTgt,bk:bumpK,ko:koT>0?1:0,rd:ride?1:0};
   const js=JSON.stringify(st);if(js===lastSent&&keepT>0)return;lastSent=js;keepT=1;netSend(st);}
 
